@@ -1,0 +1,23 @@
+# binaries
+/bin/
+/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# env
+.env
+
+# logs
+*.log
+
+# coverage
+coverage.out
+
+# vendor (если не используешь)
+vendor/
