@@ -30,16 +30,9 @@ var ogTemplate = template.Must(template.New("og").Parse(`<!DOCTYPE html>
 </html>`))
 
 func main() {
-	info, err := fetchVideoInfo("https://www.instagram.com/reel/DbtqWSnBKOe/")
-	if err != nil {
-		fmt.Println("Ошибка:", err)
-	} else {
-		fmt.Println("Получено видео:", info.Title)
-		fmt.Println("URL:", info.URL)
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /reel/{id}", reelHandler)
+	mux.HandleFunc("GET /proxy/video", proxyVideoHandler)
 
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	http.ListenAndServe(":8080", mux)
@@ -48,14 +41,59 @@ func main() {
 func reelHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	fmt.Println("Запрошен рилс с ID:", id)
+	instagramURL := "https://www.instagram.com/reel/" + id + "/"
+
+	info, err := fetchVideoInfo(instagramURL)
+	if err != nil {
+		http.Error(w, "Не удалось получить видео", http.StatusInternalServerError)
+		fmt.Println("Ошибка fetchVideoInfo:", err)
+		return
+	}
 
 	meta := VideoMeta{
-		Title:    "Рилс " + id,
-		ThumbURL: "https://placehold.co/720x1280.png",
-		VideoURL: "https://example.com/video.mp4",
+		Title:    info.Title,
+		ThumbURL: info.Thumbnail,
+		VideoURL: "http://" + r.Host + "/proxy/video?id=" + id,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	ogTemplate.Execute(w, meta)
+}
+
+func proxyVideoHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("proxyVideoHandler вызван, id:", r.URL.Query().Get("id"))
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+
+	instagramURL := "https://www.instagram.com/reel/" + id + "/"
+
+	info, err := fetchVideoInfo(instagramURL)
+	if err != nil {
+		http.Error(w, "Не удалось получить видео", http.StatusInternalServerError)
+		fmt.Println("Ошибка fetchVideoInfo:", err)
+		return
+	}
+
+	videoURL, audioURL := findBestVideoAndAudio(info.Formats)
+
+	w.Header().Set("Content-Type", "video/mp4")
+
+	if err := streamMergedVideo(videoURL, audioURL, w); err != nil {
+		fmt.Println("Ошибка стриминга:", err)
+		http.Error(w, "Video streaming failed", http.StatusInternalServerError)
+		return
+	}
+	// Важно: если заголовки уже отправлены (стриминг начался),
+	// http.Error здесь может не сработать как ожидается —
+	// это нормальное ограничение потоковых ответов (спорно)
+
+}
+func truncate(s string, max int) string {
+	if len(s) > max {
+		return s
+	}
+	return s[:max] + "..."
 }
